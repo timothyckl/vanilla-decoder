@@ -23,16 +23,19 @@ The model was trained from scratch on the [TinyStories](https://huggingface.co/d
 ### 1. Clone the repository
 
 ```bash
+git clone https://github.com/timothyckl/vanilla-decoder.git
 ```
 
 ### 2. Set up virtual environment
 
 ```bash
+python3 -m venv .venv
 ```
 
 ### 3. Install dependencies 
 
 ```bash
+pip3 install -r requirements.txt
 ```
 
 ## Training
