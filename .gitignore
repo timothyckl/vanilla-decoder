@@ -1,6 +1,6 @@
-# model weights
-weights/
-*.pt
+# # model weights
+# weights/
+# *.pt
 
 # dataset files
 data/
