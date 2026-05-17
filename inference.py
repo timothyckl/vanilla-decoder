@@ -16,7 +16,7 @@ def generate_text(
 
     for _ in range(max_new_tokens):
         if input_ids.size(1) > block_size:
-            input_ids = input_ids[:, -model.seq_len :]
+            input_ids = input_ids[:, -block_size:]
 
         logits = model(input_ids)  # [1, seq_len, vocab_size]
         next_token_logits = logits[:, -1, :]
@@ -34,11 +34,7 @@ def generate_text(
 if __name__ == "__main__":
     # ensure that config is same as during training!
     cfg = Config(
-        block_size=63, 
-        batch_size=16, 
-        num_heads=4, 
-        num_layers=4, 
-        learning_rate=1e-3
+        block_size=63, batch_size=16, num_heads=4, num_layers=4, learning_rate=1e-3
     )
     device = torch.device("mps")
 
@@ -46,7 +42,7 @@ if __name__ == "__main__":
     tokenizer.pad_token = tokenizer.eos_token
 
     # load model weights and move to mps device
-    state_dict = torch.load('./weights/model_weights.pt')
+    state_dict = torch.load("./weights/model_weights.pt", weights_only=False)
     model = DecoderTransformer(config=cfg)
     model.load_state_dict(state_dict)
     model.to(device)
