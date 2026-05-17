@@ -42,7 +42,7 @@ if __name__ == "__main__":
     tokenizer.pad_token = tokenizer.eos_token
 
     # load model weights and move to mps device
-    state_dict = torch.load("./weights/model_weights.pt")
+    state_dict = torch.load("./weights/model_weights.pt", weights_only=False)
     model = DecoderTransformer(config=cfg)
     model.load_state_dict(state_dict)
     model.to(device)
