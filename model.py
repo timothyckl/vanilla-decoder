@@ -24,6 +24,34 @@ class PositionalEncoding(nn.Module):
         return token_embeddings + pe[:, :seq_len, :]
 
 
+class AttentionHead(nn.Module):
+    def __init__(self, embed_dim=2) -> None:
+        super().__init__()
+        self.w_q = nn.Linear(in_features=embed_dim, out_features=embed_dim, bias=False)
+        self.w_k = nn.Linear(in_features=embed_dim, out_features=embed_dim, bias=False)
+        self.w_v = nn.Linear(in_features=embed_dim, out_features=embed_dim, bias=False)
+
+        self.row_dim = 1
+        self.col_dim = 2
+
+    def forward(self, encoded_embeddings, mask=None):
+        q = self.w_q(encoded_embeddings)
+        k = self.w_k(encoded_embeddings)
+        v = self.w_v(encoded_embeddings)
+
+        k_T = k.transpose(dim0=self.row_dim, dim1=self.col_dim)
+
+        sim = torch.matmul(q, k_T)
+        scaled_sim = sim / torch.tensor(k.size(self.col_dim) ** 0.5)
+        if mask is not None:
+            scaled_sim = scaled_sim.masked_fill(mask=mask, value=-torch.inf)
+
+        att_pct = F.softmax(scaled_sim, dim=self.col_dim)
+        att_scr = torch.matmul(att_pct, v)
+
+        return att_scr
+
+
 class MultiHeadAttention(nn.Module):
     def __init__(self, embed_dim=2, num_heads=1, dropout=0.0):
         super().__init__()
