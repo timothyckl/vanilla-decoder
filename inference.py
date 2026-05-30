@@ -3,46 +3,60 @@ from transformers import GPT2TokenizerFast
 
 from config import Config
 from model import DecoderTransformer
+from utils import get_device
 
 
 @torch.no_grad()
 def generate_text(
-    model, tokenizer, prompt, block_size, max_new_tokens=50, device="cpu"
+    model,
+    tokenizer,
+    prompt,
+    block_size,
+    max_new_tokens=50,
+    device="cpu",
+    temperature=1.0,
+    top_k=50,
 ):
     model.eval()
 
     input_ids = tokenizer.encode(prompt, return_tensors="pt").to(device)
-    # print(f"prompt tensor shape: {input_ids.shape}")
 
     for _ in range(max_new_tokens):
-        if input_ids.size(1) > block_size:
-            input_ids = input_ids[:, -block_size:]
-
-        logits = model(input_ids)  # [1, seq_len, vocab_size]
+        model_input = input_ids[:, -block_size:]
+        logits = model(model_input)  # [1, seq_len, vocab_size]
         next_token_logits = logits[:, -1, :]
 
-        next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+        if temperature <= 0:
+            next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+        else:
+            next_token_logits = next_token_logits / temperature
+            if top_k is not None:
+                k = min(top_k, next_token_logits.size(-1))
+                top_k_values, _ = torch.topk(next_token_logits, k)
+                next_token_logits = next_token_logits.masked_fill(
+                    next_token_logits < top_k_values[:, [-1]],
+                    -torch.inf,
+                )
+            probs = torch.softmax(next_token_logits, dim=-1)
+            next_token = torch.multinomial(probs, num_samples=1)
 
-        # append predicted token
         input_ids = torch.cat([input_ids, next_token], dim=1)
 
-    # decode to text
+        if tokenizer.eos_token_id is not None and next_token.item() == tokenizer.eos_token_id:
+            break
+
     generated_text = tokenizer.decode(input_ids[0], skip_special_tokens=True)
     return generated_text
 
 
 if __name__ == "__main__":
-    # ensure that config is same as during training!
-    cfg = Config(
-        block_size=63, batch_size=16, num_heads=4, num_layers=4, learning_rate=1e-3
-    )
-    device = torch.device("mps")
+    cfg = Config()
+    device = get_device()
 
     tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
     tokenizer.pad_token = tokenizer.eos_token
 
-    # load model weights and move to mps device
-    state_dict = torch.load("./weights/model_weights.pt", weights_only=False)
+    state_dict = torch.load(cfg.checkpoint_path, map_location=device, weights_only=True)
     model = DecoderTransformer(config=cfg)
     model.load_state_dict(state_dict)
     model.to(device)
@@ -55,5 +69,7 @@ if __name__ == "__main__":
         block_size=cfg.block_size,
         max_new_tokens=8,
         device=device,
+        temperature=0.8,
+        top_k=50,
     )
     print(generated)
