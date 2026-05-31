@@ -66,9 +66,12 @@ if __name__ == "__main__":
     tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
     tokenizer.pad_token = tokenizer.eos_token
 
-    state_dict = torch.load(cfg.checkpoint_path, map_location=device, weights_only=True)
+    if cfg.checkpoint_path is None:
+        raise ValueError("checkpoint_path must be set before running inference")
+
+    checkpoint = torch.load(cfg.checkpoint_path, map_location=device, weights_only=True)
     model = DecoderTransformer(config=cfg)
-    model.load_state_dict(state_dict)
+    model.load_state_dict(checkpoint["model_state_dict"])
     model.to(device)
 
     prompt = "A long time ago,"
