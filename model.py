@@ -34,15 +34,32 @@ class AttentionHead(nn.Module):
         self.row_dim = 1
         self.col_dim = 2
 
-    def forward(self, encoded_embeddings, mask=None):
+        self.register_buffer("cache_k", None, persistent=False)
+        self.register_buffer("cache_v", None, persistent=False)
+
+    def reset_cache(self):
+        self.cache_k = None
+        self.cache_v = None
+
+    def forward(self, encoded_embeddings, mask=None, use_cache=False):
         q = self.w_q(encoded_embeddings)
         k = self.w_k(encoded_embeddings)
         v = self.w_v(encoded_embeddings)
 
+        if use_cache:
+            if self.cache_k is not None and self.cache_v is not None:
+                # append new keys/values to the cached tensors
+                k = torch.cat([self.cache_k, k], dim=self.row_dim)
+                v = torch.cat([self.cache_v, v], dim=self.row_dim)
+
+            self.cache_k = k
+            self.cache_v = v
+
         k_T = k.transpose(dim0=self.row_dim, dim1=self.col_dim)
 
         sim = torch.matmul(q, k_T)
-        scaled_sim = sim / torch.tensor(k.size(self.col_dim) ** 0.5)
+        scaled_sim = sim / (k.size(self.col_dim) ** 0.5)
+
         if mask is not None:
             scaled_sim = scaled_sim.masked_fill(mask=mask, value=-torch.inf)
 
@@ -120,7 +137,9 @@ class Block(nn.Module):
 
     def forward(self, encoded_embeddings, mask=None):
         # prenorm embeddings
-        attn_out = encoded_embeddings + self.attn_heads(self.norm_a(encoded_embeddings), mask)
+        attn_out = encoded_embeddings + self.attn_heads(
+            self.norm_a(encoded_embeddings), mask
+        )
         ffn_out = attn_out + self.pw_ffn(self.norm_b(attn_out))
 
         return ffn_out
@@ -129,13 +148,21 @@ class Block(nn.Module):
 class DecoderTransformer(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.we = nn.Embedding(num_embeddings=config.vocab_size, embedding_dim=config.embed_dim)
-        self.pe = PositionalEncoding(embed_dim=config.embed_dim, seq_len=config.block_size)
-        self.layers = nn.ModuleList([
-            Block(config.embed_dim, config.num_heads, config.dropout)
-            for _ in range(config.num_layers)
-        ])
-        self.lm_head = nn.Linear(in_features=config.embed_dim, out_features=config.vocab_size)
+        self.we = nn.Embedding(
+            num_embeddings=config.vocab_size, embedding_dim=config.embed_dim
+        )
+        self.pe = PositionalEncoding(
+            embed_dim=config.embed_dim, seq_len=config.block_size
+        )
+        self.layers = nn.ModuleList(
+            [
+                Block(config.embed_dim, config.num_heads, config.dropout)
+                for _ in range(config.num_layers)
+            ]
+        )
+        self.lm_head = nn.Linear(
+            in_features=config.embed_dim, out_features=config.vocab_size
+        )
 
     def forward(self, input_ids):
         word_embedding = self.we(input_ids)
@@ -146,7 +173,9 @@ class DecoderTransformer(nn.Module):
             torch.ones((seq_len, seq_len), device=input_ids.device, dtype=torch.bool),
             diagonal=1,
         )
-        bool_mask = bool_mask.unsqueeze(0).unsqueeze(0)  # [batch_size, num_heads, seq_len, seq_len]
+        bool_mask = bool_mask.unsqueeze(0).unsqueeze(
+            0
+        )  # [batch_size, num_heads, seq_len, seq_len]
 
         x = position_encoding
         for layer in self.layers:
