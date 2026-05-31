@@ -41,7 +41,7 @@ pip3 install -r requirements.txt
 ## Training
 
 ```bash
-python3 train.py
+python3 src/train.py
 ```
 
 ## Inference
@@ -49,7 +49,7 @@ python3 train.py
 Given the prompt `A long time ago,`, the model is able to produce the following output even though the dataset used is somewhat simple and training was only on a single epoch.
 
 ```bash
-python3 inference.py
+python3 src/inference.py
 ```
 
 ```bash

@@ -1,5 +1,5 @@
 from config import Config
-from engine import train
+from core.engine import train
 
 
 if __name__ == "__main__":
