@@ -114,15 +114,30 @@ class MultiHeadAttention(nn.Module):
             self.cache_v = v
 
         # scaled dot product attention per head
-        k_T = k.transpose(dim0=-2, dim1=-1)
-        sim = torch.matmul(q, k_T)
-        scaled_sim = sim / (self.d_h**0.5)  # [batch_size, num_heads, seq_len, seq_len]
+        # k_T = k.transpose(dim0=-2, dim1=-1)
+        # sim = torch.matmul(q, k_T)
+        # scaled_sim = sim / (self.d_h**0.5)  # [batch_size, num_heads, seq_len, seq_len]
+        #
+        # if mask is not None:
+        #     scaled_sim = scaled_sim.masked_fill(mask=mask, value=-torch.inf)
+        #
+        # att_pct = self.attn_dropout(F.softmax(scaled_sim, dim=-1))
+        # att_scr = torch.matmul(att_pct, v)  # [batch_size, num_heads, seq_len, d_h]
 
-        if mask is not None:
-            scaled_sim = scaled_sim.masked_fill(mask=mask, value=-torch.inf)
+        q_len = q.size(-2)
+        k_len = k.size(-2)
 
-        att_pct = self.attn_dropout(F.softmax(scaled_sim, dim=-1))
-        att_scr = torch.matmul(att_pct, v)  # [batch_size, num_heads, seq_len, d_h]
+        # mask during training/prefill, not during decode
+        is_causal = mask is not None and (q_len == k_len)
+
+        att_scr = F.scaled_dot_product_attention(
+            q,
+            k,
+            v,
+            attn_mask=None,
+            dropout_p=self.attn_dropout.p if self.training else 0.0,
+            is_causal=is_causal,
+        )
 
         # concatenate outputs per head
         out = (
