@@ -6,9 +6,9 @@ class Config:
     batch_size: int = 16
     vocab_size: int = 50257
     embed_dim: int = 768
-    block_size: int = 63
-    num_heads: int = 4  # embed_dim must be divisible by num_heads
-    num_layers: int = 4
+    block_size: int = 128
+    num_heads: int = 8  # embed_dim must be divisible by num_heads
+    num_layers: int = 6
     epochs: int = 1
     learning_rate: float = 1e-3
     dropout: float = 0.1
