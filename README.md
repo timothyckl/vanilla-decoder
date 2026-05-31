@@ -44,9 +44,19 @@ pip3 install -r requirements.txt
 python3 src/train.py
 ```
 
+Checkpoints are saved at the end of each epoch using the completed epoch number:
+
+```text
+weights/checkpoint_epoch_001.pt
+```
+
+To resume training, set `resume_training = True` and `checkpoint_path` in `src/config.py`. The `epochs` value is the total target epoch count, so resuming from `checkpoint_epoch_002.pt` with `epochs = 5` continues from epoch 3 through epoch 5.
+
 ## Inference
 
 Given the prompt `A long time ago,`, the model is able to produce the following output even though the dataset used is somewhat simple and training was only on a single epoch.
+
+Set `checkpoint_path` in `src/config.py` to the checkpoint you want to use, then run:
 
 ```bash
 python3 src/inference.py
