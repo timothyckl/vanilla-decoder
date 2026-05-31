@@ -18,10 +18,10 @@ class PositionalEncoding(nn.Module):
 
         self.register_buffer("pe", pe)
 
-    def forward(self, token_embeddings):
+    def forward(self, token_embeddings, start_pos=0):
         seq_len = token_embeddings.size(1)
         pe = self.pe.unsqueeze(dim=0)  # [1, seq_len, embed_dim]
-        return token_embeddings + pe[:, :seq_len, :]
+        return token_embeddings + pe[:, start_pos : start_pos + seq_len, :]
 
 
 class AttentionHead(nn.Module):
@@ -34,15 +34,32 @@ class AttentionHead(nn.Module):
         self.row_dim = 1
         self.col_dim = 2
 
-    def forward(self, encoded_embeddings, mask=None):
+        self.register_buffer("cache_k", None, persistent=False)
+        self.register_buffer("cache_v", None, persistent=False)
+
+    def reset_cache(self):
+        self.cache_k = None
+        self.cache_v = None
+
+    def forward(self, encoded_embeddings, mask=None, use_cache=False):
         q = self.w_q(encoded_embeddings)
         k = self.w_k(encoded_embeddings)
         v = self.w_v(encoded_embeddings)
 
+        if use_cache:
+            if self.cache_k is not None and self.cache_v is not None:
+                # append new keys/values to the cached tensors
+                k = torch.cat([self.cache_k, k], dim=self.row_dim)
+                v = torch.cat([self.cache_v, v], dim=self.row_dim)
+
+            self.cache_k = k
+            self.cache_v = v
+
         k_T = k.transpose(dim0=self.row_dim, dim1=self.col_dim)
 
         sim = torch.matmul(q, k_T)
-        scaled_sim = sim / torch.tensor(k.size(self.col_dim) ** 0.5)
+        scaled_sim = sim / (k.size(self.col_dim) ** 0.5)
+
         if mask is not None:
             scaled_sim = scaled_sim.masked_fill(mask=mask, value=-torch.inf)
 
@@ -69,7 +86,14 @@ class MultiHeadAttention(nn.Module):
         self.resid_dropout = nn.Dropout(dropout)
         self.w_o = nn.Linear(in_features=embed_dim, out_features=embed_dim)
 
-    def forward(self, encoded_embeddings, mask=None):
+        self.register_buffer("cache_k", None, persistent=False)
+        self.register_buffer("cache_v", None, persistent=False)
+
+    def reset_cache(self):
+        self.cache_k = None
+        self.cache_v = None
+
+    def forward(self, encoded_embeddings, mask=None, use_cache=False):
         batch_size, seq_len, _ = encoded_embeddings.size()
 
         # [batch_size, seq_len, embed_dim]
@@ -81,6 +105,13 @@ class MultiHeadAttention(nn.Module):
         q = q.view(batch_size, seq_len, self.num_heads, self.d_h).transpose(1, 2)
         k = k.view(batch_size, seq_len, self.num_heads, self.d_h).transpose(1, 2)
         v = v.view(batch_size, seq_len, self.num_heads, self.d_h).transpose(1, 2)
+
+        if use_cache:
+            if self.cache_k is not None and self.cache_v is not None:
+                k = torch.cat([self.cache_k, k], dim=2)  # dim = 2 is seq_len here.
+                v = torch.cat([self.cache_v, v], dim=2)
+            self.cache_k = k
+            self.cache_v = v
 
         # scaled dot product attention per head
         k_T = k.transpose(dim0=-2, dim1=-1)
@@ -118,9 +149,11 @@ class Block(nn.Module):
         self.norm_a = nn.LayerNorm(normalized_shape=embed_dim)
         self.norm_b = nn.LayerNorm(normalized_shape=embed_dim)
 
-    def forward(self, encoded_embeddings, mask=None):
+    def forward(self, encoded_embeddings, mask=None, use_cache=False):
         # prenorm embeddings
-        attn_out = encoded_embeddings + self.attn_heads(self.norm_a(encoded_embeddings), mask)
+        attn_out = encoded_embeddings + self.attn_heads(
+            self.norm_a(encoded_embeddings), mask, use_cache=use_cache
+        )
         ffn_out = attn_out + self.pw_ffn(self.norm_b(attn_out))
 
         return ffn_out
@@ -129,28 +162,47 @@ class Block(nn.Module):
 class DecoderTransformer(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.we = nn.Embedding(num_embeddings=config.vocab_size, embedding_dim=config.embed_dim)
-        self.pe = PositionalEncoding(embed_dim=config.embed_dim, seq_len=config.block_size)
-        self.layers = nn.ModuleList([
-            Block(config.embed_dim, config.num_heads, config.dropout)
-            for _ in range(config.num_layers)
-        ])
-        self.lm_head = nn.Linear(in_features=config.embed_dim, out_features=config.vocab_size)
+        self.we = nn.Embedding(
+            num_embeddings=config.vocab_size, embedding_dim=config.embed_dim
+        )
+        self.pe = PositionalEncoding(
+            embed_dim=config.embed_dim, seq_len=config.block_size
+        )
+        self.layers = nn.ModuleList(
+            [
+                Block(config.embed_dim, config.num_heads, config.dropout)
+                for _ in range(config.num_layers)
+            ]
+        )
+        self.lm_head = nn.Linear(
+            in_features=config.embed_dim, out_features=config.vocab_size
+        )
 
-    def forward(self, input_ids):
+    def reset_cache(self):
+        for layer in self.layers:
+            layer.attn_heads.reset_cache()
+
+    def forward(self, input_ids, use_cache=False):
+        cached_seq_len = 0
+
+        if use_cache and self.layers[0].attn_heads.cache_k is not None:
+            cached_seq_len = self.layers[0].attn_heads.cache_k.size(2)
+
         word_embedding = self.we(input_ids)
-        position_encoding = self.pe(word_embedding)
+        position_encoding = self.pe(word_embedding, start_pos=cached_seq_len)
 
         seq_len = input_ids.size(1)
         bool_mask = torch.triu(
             torch.ones((seq_len, seq_len), device=input_ids.device, dtype=torch.bool),
             diagonal=1,
         )
-        bool_mask = bool_mask.unsqueeze(0).unsqueeze(0)  # [batch_size, num_heads, seq_len, seq_len]
+        bool_mask = bool_mask.unsqueeze(0).unsqueeze(
+            0
+        )  # [batch_size, num_heads, seq_len, seq_len]
 
         x = position_encoding
         for layer in self.layers:
-            x = layer(x, bool_mask)
+            x = layer(x, bool_mask, use_cache=use_cache)
 
         logits = self.lm_head(x)
 
