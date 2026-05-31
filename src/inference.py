@@ -2,8 +2,8 @@ import torch
 from transformers import GPT2TokenizerFast
 
 from config import Config
-from model import DecoderTransformer
-from utils import get_device
+from core.model import DecoderTransformer
+from core.utils import get_device
 
 
 @torch.no_grad()

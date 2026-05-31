@@ -4,9 +4,9 @@ import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 
-from model import DecoderTransformer
-from setup_data import get_data_loaders
-from utils import get_device
+from core.model import DecoderTransformer
+from core.utils import get_device
+from data.setup_data import get_data_loaders
 
 
 def train_step(model, batch, optimiser, device, ignore_index=-100, max_grad_norm=None):
