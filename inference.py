@@ -18,12 +18,17 @@ def generate_text(
     top_k=50,
 ):
     model.eval()
+    model.reset_cache()
 
+    # prefill prompt
     input_ids = tokenizer.encode(prompt, return_tensors="pt").to(device)
+    model_input = input_ids[:, -block_size:]
+    logits = model(model_input, use_cache=True)
+
+    avail_new_tokens = block_size - model_input.size(1)
+    max_new_tokens = min(max_new_tokens, avail_new_tokens)
 
     for _ in range(max_new_tokens):
-        model_input = input_ids[:, -block_size:]
-        logits = model(model_input)  # [1, seq_len, vocab_size]
         next_token_logits = logits[:, -1, :]
 
         if temperature <= 0:
@@ -42,8 +47,13 @@ def generate_text(
 
         input_ids = torch.cat([input_ids, next_token], dim=1)
 
-        if tokenizer.eos_token_id is not None and next_token.item() == tokenizer.eos_token_id:
+        if (
+            tokenizer.eos_token_id is not None
+            and next_token.item() == tokenizer.eos_token_id
+        ):
             break
+
+        logits = model(next_token, use_cache=True)
 
     generated_text = tokenizer.decode(input_ids[0], skip_special_tokens=True)
     return generated_text
