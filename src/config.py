@@ -9,13 +9,13 @@ class Config:
     block_size: int = 128
     num_heads: int = 8  # embed_dim must be divisible by num_heads
     num_layers: int = 6
-    epochs: int = 1
+    epochs: int = 3
     learning_rate: float = 1e-3
     dropout: float = 0.1
     max_grad_norm: float | None = 1.0
     ignore_index: int = -100
     resume_training: bool = False
-    checkpoint_path: str | None = None
+    checkpoint_path: str | None = "./weights/checkpoint_epoch_001.pt"
     checkpoint_dir: str = "./weights"
     checkpoint_prefix: str = "checkpoint"
 

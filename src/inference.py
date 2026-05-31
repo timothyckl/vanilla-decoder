@@ -12,7 +12,7 @@ def generate_text(
     tokenizer,
     prompt,
     block_size,
-    max_new_tokens=50,
+    max_new_tokens=100,
     device="cpu",
     temperature=1.0,
     top_k=50,
@@ -74,13 +74,13 @@ if __name__ == "__main__":
     model.load_state_dict(checkpoint["model_state_dict"])
     model.to(device)
 
-    prompt = "A long time ago,"
+    prompt = 'She said to him, in her dying breath: "'
     generated = generate_text(
         model,
         tokenizer,
         prompt,
         block_size=cfg.block_size,
-        max_new_tokens=8,
+        max_new_tokens=100,
         device=device,
         temperature=0.8,
         top_k=50,
