@@ -16,12 +16,13 @@ def train_step(model, batch, optimiser, device, ignore_index=-100, max_grad_norm
     input_ids = batch["input_ids"].to(device)
     labels = batch["labels"].to(device)
 
-    logits = model(input_ids)
-    loss = F.cross_entropy(
-        input=logits.view(-1, logits.size(-1)),
-        target=labels.view(-1),
-        ignore_index=ignore_index,
-    )
+    with torch.autocast(device_type="mps", dtype=torch.bfloat16):
+        logits = model(input_ids)
+        loss = F.cross_entropy(
+            input=logits.view(-1, logits.size(-1)),
+            target=labels.view(-1),
+            ignore_index=ignore_index,
+        )
 
     optimiser.zero_grad(set_to_none=True)
     loss.backward()
@@ -134,7 +135,7 @@ def train(config, device=None):
     for epoch in range(start_epoch, config.epochs):
         total_loss = 0
 
-        with tqdm(train_loader, desc=f"Epoch {epoch+1}", leave=True) as progress_bar:
+        with tqdm(train_loader, desc=f"Epoch {epoch + 1}", leave=True) as progress_bar:
             for batch in progress_bar:
                 batch_loss = train_step(
                     model,
@@ -157,7 +158,7 @@ def train(config, device=None):
         )
 
         tqdm.write(
-            f"Epoch {epoch+1}: "
+            f"Epoch {epoch + 1}: "
             f"train_loss={avg_train_loss:.4f}, val_loss={avg_val_loss:.4f}"
         )
 
