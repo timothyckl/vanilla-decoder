@@ -56,8 +56,8 @@ def validate_step(model, val_loader, device, ignore_index=-100):
     return total_val_loss / len(val_loader)
 
 
-def get_checkpoint_path(config, epoch):
-    filename = f"{config.checkpoint_prefix}_epoch_{epoch:03d}.pt"
+def get_checkpoint_path(config, epoch, global_step):
+    filename = f"{config.checkpoint_prefix}_epoch_{epoch:03d}_step_{global_step:06d}.pt"
     return os.path.join(config.checkpoint_dir, filename)
 
 
@@ -97,7 +97,7 @@ def save_checkpoint(
     avg_val_loss,
 ):
     os.makedirs(config.checkpoint_dir, exist_ok=True)
-    checkpoint_path = get_checkpoint_path(config, completed_epoch)
+    checkpoint_path = get_checkpoint_path(config, completed_epoch, global_step)
 
     torch.save(
         {
@@ -132,43 +132,77 @@ def train(config, device=None):
         )
         return
 
-    for epoch in range(start_epoch, config.epochs):
-        total_loss = 0
+    current_epoch = start_epoch
+    total_loss = 0.0
+    batches_trained_this_epoch = 0
 
-        with tqdm(train_loader, desc=f"Epoch {epoch + 1}", leave=True) as progress_bar:
-            for batch in progress_bar:
-                batch_loss = train_step(
-                    model,
-                    batch,
-                    optimiser,
-                    device,
-                    ignore_index=config.ignore_index,
-                    max_grad_norm=config.max_grad_norm,
-                )
-                total_loss += batch_loss
-                global_step += 1
-                progress_bar.set_postfix(batch_loss=f"{batch_loss:.4f}")
+    try:
+        for epoch in range(start_epoch, config.epochs):
+            current_epoch = epoch
+            total_loss = 0.0
+            batches_trained_this_epoch = 0
 
-        avg_train_loss = total_loss / len(train_loader)
-        avg_val_loss = validate_step(
-            model,
-            val_loader,
-            device,
-            ignore_index=config.ignore_index,
+            with tqdm(train_loader, desc=f"Epoch {epoch + 1}", leave=True) as progress_bar:
+                for batch in progress_bar:
+                    batch_loss = train_step(
+                        model,
+                        batch,
+                        optimiser,
+                        device,
+                        ignore_index=config.ignore_index,
+                        max_grad_norm=config.max_grad_norm,
+                    )
+                    total_loss += batch_loss
+                    batches_trained_this_epoch += 1
+                    global_step += 1
+                    progress_bar.set_postfix(
+                        batch_loss=f"{batch_loss:.4f}",
+                        global_step=global_step,
+                    )
+
+            avg_train_loss = total_loss / len(train_loader)
+            avg_val_loss = validate_step(
+                model,
+                val_loader,
+                device,
+                ignore_index=config.ignore_index,
+            )
+
+            tqdm.write(
+                f"Epoch {epoch + 1}: "
+                f"train_loss={avg_train_loss:.4f}, val_loss={avg_val_loss:.4f}"
+            )
+
+            checkpoint_path = save_checkpoint(
+                config,
+                model,
+                optimiser,
+                completed_epoch=epoch + 1,
+                global_step=global_step,
+                avg_train_loss=avg_train_loss,
+                avg_val_loss=avg_val_loss,
+            )
+            tqdm.write(f"Saved checkpoint to {checkpoint_path}")
+    except KeyboardInterrupt:
+        avg_train_loss = (
+            total_loss / batches_trained_this_epoch
+            if batches_trained_this_epoch > 0
+            else None
         )
-
-        tqdm.write(
-            f"Epoch {epoch + 1}: "
-            f"train_loss={avg_train_loss:.4f}, val_loss={avg_val_loss:.4f}"
+        completed_epoch = (
+            current_epoch + 1
+            if batches_trained_this_epoch == len(train_loader)
+            else current_epoch
         )
 
         checkpoint_path = save_checkpoint(
             config,
             model,
             optimiser,
-            completed_epoch=epoch + 1,
+            completed_epoch=completed_epoch,
             global_step=global_step,
             avg_train_loss=avg_train_loss,
-            avg_val_loss=avg_val_loss,
+            avg_val_loss=None,
         )
-        tqdm.write(f"Saved checkpoint to {checkpoint_path}")
+        tqdm.write(f"Keyboard interrupt received. Saved checkpoint to {checkpoint_path}")
+        raise

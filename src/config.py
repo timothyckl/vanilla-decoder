@@ -14,8 +14,8 @@ class Config:
     dropout: float = 0.1
     max_grad_norm: float | None = 1.0
     ignore_index: int = -100
-    resume_training: bool = False
-    checkpoint_path: str | None = "./weights/checkpoint_epoch_001.pt"
+    resume_training: bool = True
+    checkpoint_path: str | None = "./weights/checkpoint_epoch_001_step_229581.pt"
     checkpoint_dir: str = "./weights"
     checkpoint_prefix: str = "checkpoint"
 
