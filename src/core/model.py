@@ -24,6 +24,47 @@ class PositionalEncoding(nn.Module):
         return token_embeddings + pe[:, start_pos : start_pos + seq_len, :]
 
 
+class RotaryEmbedding(nn.Module):
+    def __init__(self, d_h, seq_len=128, base=10000):
+        super().__init__()
+
+        self.d_h = d_h  # full head dimensions
+        self.num_pairs = d_h // 2
+        self.pos = torch.arange(start=0, end=seq_len, step=1).float().unsqueeze(1)
+        
+        # create frequences for d_h // 2 pairs
+        two_i = torch.arange(0, self.num_pairs, 2).float()
+        freqs = 1.0 / (base ** (two_i / self.num_pairs))
+
+        # combine positions and frequencies into angles [seq_len, d_h // 2]
+        # angles = torch.matmul(self.pos[:, None], freqs[None, :]) 
+        angles = self.pos.matmul(freqs.unsqueeze(0))
+        cos, sin = angles.cos(), angles.sin()
+
+        # store cos and sin as buffers
+        self.register_buffer("cos", cos)
+        self.register_buffer("sin", sin)
+
+        # NOTE: to broadcast cleanly over batches across d_h
+        # this means making cos and sin [batch_size, d_h, seq_len, d_h // 2]
+        # effectively making them [1, 1, seq_len, d_h // 2]
+
+    def forward(self, x):
+        # derve seq_len from Q or K.
+        # NOTE: -2 is the sequence length
+        seq_len = x.size(-2)
+
+        cos = self.cos[:seq_len]  # [seq_len, d_h // 2]
+        sin = self.sin[:seq_len]  # [seq_len, d_h // 2]
+
+        cos = cos.unsqueeze(0).unsqueeze(0)  # [1, 1, seq_len, d_h // 2]
+        sin = sin.unsqueeze(0).unsqueeze(0)  # [1, 1, seq_len, d_h // 2]
+
+
+        # TODO: apply rotations to Q or K
+
+
+
 class AttentionHead(nn.Module):
     def __init__(self, embed_dim=2) -> None:
         super().__init__()
