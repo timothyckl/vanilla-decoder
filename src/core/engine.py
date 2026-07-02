@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from core.model import DecoderTransformer
+from core.model import DecoderTransformer, RoFormer
 from core.utils import get_device
 from data.setup_data import get_data_loaders
 
@@ -125,7 +125,10 @@ def train(config, device=None):
     device = device or get_device()
     train_loader, val_loader = get_data_loaders(config=config)
 
-    model = DecoderTransformer(config=config)
+    if config.model_type == "roformer":
+        model = RoFormer(config=config)
+    else:
+        model = DecoderTransformer(config=config)
     model.to(device)
 
     optimiser = torch.optim.Adam(model.parameters(), lr=config.learning_rate)

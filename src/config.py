@@ -18,6 +18,7 @@ class Config:
     checkpoint_path: str | None = "./weights/checkpoint_epoch_002_step_549207.pt"
     checkpoint_dir: str = "./weights"
     checkpoint_prefix: str = "checkpoint"
+    model_type: str = "decoder"
     seed: int = 42
 
     def __post_init__(self):
@@ -29,3 +30,13 @@ class Config:
             raise ValueError("embed_dim must be divisible by num_heads")
         if not 0.0 <= self.dropout < 1.0:
             raise ValueError("dropout must be in the range [0.0, 1.0)")
+
+
+@dataclass
+class RoFormerConfig(Config):
+    batch_size: int = 8
+    block_size: int = 256
+    model_type: str = "roformer"
+    checkpoint_prefix: str = "roformer_checkpoint"
+    checkpoint_path: str | None = None
+    resume_training: bool = False
