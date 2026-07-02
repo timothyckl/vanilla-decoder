@@ -15,10 +15,11 @@ class Config:
     max_grad_norm: float | None = 1.0
     ignore_index: int = -100
     resume_training: bool = True
-    checkpoint_path: str | None = "./weights/checkpoint_epoch_001_step_229581.pt"
+    checkpoint_path: str | None = "./weights/checkpoint_epoch_002_step_549207.pt"
     checkpoint_dir: str = "./weights"
     checkpoint_prefix: str = "checkpoint"
     model_type: str = "decoder"
+    seed: int = 42
 
     def __post_init__(self):
         if self.block_size < 1:

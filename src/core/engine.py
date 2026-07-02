@@ -1,8 +1,10 @@
 import os
 from dataclasses import asdict
+from itertools import islice
 
 import torch
 import torch.nn.functional as F
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from core.model import DecoderTransformer, RoFormer
@@ -63,7 +65,7 @@ def get_checkpoint_path(config, epoch, global_step):
 
 def load_checkpoint(config, model, optimiser, device):
     if not config.resume_training:
-        return 0, 0
+        return 0, 0, 0
 
     if config.checkpoint_path is None:
         raise ValueError("checkpoint_path must be set when resume_training is True")
@@ -78,13 +80,15 @@ def load_checkpoint(config, model, optimiser, device):
 
     start_epoch = checkpoint["epoch"]
     global_step = checkpoint["global_step"]
+    batch_offset = checkpoint.get("batch_offset", 0)
 
     tqdm.write(
         f"Resuming from {config.checkpoint_path}: "
-        f"completed_epoch={start_epoch}, global_step={global_step}"
+        f"completed_epoch={start_epoch}, global_step={global_step}, "
+        f"batch_offset={batch_offset}"
     )
 
-    return start_epoch, global_step
+    return start_epoch, global_step, batch_offset
 
 
 def save_checkpoint(
@@ -95,6 +99,7 @@ def save_checkpoint(
     global_step,
     avg_train_loss,
     avg_val_loss,
+    batch_offset=0,
 ):
     os.makedirs(config.checkpoint_dir, exist_ok=True)
     checkpoint_path = get_checkpoint_path(config, completed_epoch, global_step)
@@ -105,6 +110,7 @@ def save_checkpoint(
             "optimiser_state_dict": optimiser.state_dict(),
             "epoch": completed_epoch,
             "global_step": global_step,
+            "batch_offset": batch_offset,
             "train_loss": avg_train_loss,
             "val_loss": avg_val_loss,
             "config": asdict(config),
@@ -126,7 +132,14 @@ def train(config, device=None):
     model.to(device)
 
     optimiser = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
-    start_epoch, global_step = load_checkpoint(config, model, optimiser, device)
+    start_epoch, global_step, batch_offset = load_checkpoint(
+        config, model, optimiser, device
+    )
+
+    if config.resume_training and batch_offset == 0 and len(train_loader) > 0:
+        batch_offset = global_step % len(train_loader)
+        if batch_offset > 0:
+            tqdm.write(f"Inferred batch_offset={batch_offset} from global_step")
 
     if start_epoch >= config.epochs:
         tqdm.write(
@@ -138,15 +151,32 @@ def train(config, device=None):
     current_epoch = start_epoch
     total_loss = 0.0
     batches_trained_this_epoch = 0
+    batches_trained_this_run = 0
 
     try:
         for epoch in range(start_epoch, config.epochs):
             current_epoch = epoch
             total_loss = 0.0
-            batches_trained_this_epoch = 0
+            batches_trained_this_epoch = batch_offset if epoch == start_epoch else 0
+            batches_trained_this_run = 0
 
-            with tqdm(train_loader, desc=f"Epoch {epoch + 1}", leave=True) as progress_bar:
-                for batch in progress_bar:
+            generator = torch.Generator()
+            generator.manual_seed(config.seed + epoch)
+            epoch_train_loader = DataLoader(
+                train_loader.dataset,
+                batch_size=config.batch_size,
+                shuffle=True,
+                generator=generator,
+            )
+            batches = islice(epoch_train_loader, batches_trained_this_epoch, None)
+
+            with tqdm(
+                desc=f"Epoch {epoch + 1}",
+                initial=batches_trained_this_epoch,
+                total=len(epoch_train_loader),
+                leave=True,
+            ) as progress_bar:
+                for batch in batches:
                     batch_loss = train_step(
                         model,
                         batch,
@@ -157,13 +187,16 @@ def train(config, device=None):
                     )
                     total_loss += batch_loss
                     batches_trained_this_epoch += 1
+                    batches_trained_this_run += 1
                     global_step += 1
                     progress_bar.set_postfix(
                         batch_loss=f"{batch_loss:.4f}",
                         global_step=global_step,
                     )
+                    progress_bar.update(1)
 
-            avg_train_loss = total_loss / len(train_loader)
+            avg_train_loss = total_loss / max(batches_trained_this_run, 1)
+            batch_offset = 0
             avg_val_loss = validate_step(
                 model,
                 val_loader,
@@ -184,12 +217,13 @@ def train(config, device=None):
                 global_step=global_step,
                 avg_train_loss=avg_train_loss,
                 avg_val_loss=avg_val_loss,
+                batch_offset=0,
             )
             tqdm.write(f"Saved checkpoint to {checkpoint_path}")
     except KeyboardInterrupt:
         avg_train_loss = (
-            total_loss / batches_trained_this_epoch
-            if batches_trained_this_epoch > 0
+            total_loss / batches_trained_this_run
+            if batches_trained_this_run > 0
             else None
         )
         completed_epoch = (
@@ -206,6 +240,10 @@ def train(config, device=None):
             global_step=global_step,
             avg_train_loss=avg_train_loss,
             avg_val_loss=None,
+            batch_offset=batches_trained_this_epoch,
         )
-        tqdm.write(f"Keyboard interrupt received. Saved checkpoint to {checkpoint_path}")
+        tqdm.write(
+            "Keyboard interrupt received. "
+            f"Weight checkpoint safely saved to {checkpoint_path}"
+        )
         raise
