@@ -10,7 +10,18 @@ The motivation for this project was to:
 2. Gain a deeper understanding of how attention is computed and how the model internals interact during training and inference
 3. Build an intuition for autoregressive text generation and the structure of small-scale transformer models
 
-The model was trained from scratch on the [TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories) dataset which is a lightweight dataset designed for training small language models that generate simple narratives. 
+The model was trained from scratch on the [TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories) dataset which is a lightweight dataset designed for training small language models that generate simple narratives.
+
+## Features
+
+- [x] Rotary positional embeddings
+- [ ] RMSNorm
+- [ ] SwiGLU Activation 
+- [ ] Weight tying
+- [ ] Full bias removal
+- [ ] QK normalisation
+- [ ] Grouped Query Attention / Multi-Query Attention
+- [ ] AdamW / Muon optimisers
 
 ### Resources Used
 
