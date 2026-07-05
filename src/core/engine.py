@@ -1,3 +1,4 @@
+import copy
 import math
 import os
 from dataclasses import asdict
@@ -41,14 +42,16 @@ def train_step(
     loss = loss / gradient_accumulation_steps
     loss.backward()
 
+    step_taken = False
     if (global_step + 1) % gradient_accumulation_steps == 0:
         if max_grad_norm is not None:
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
         optimiser.step()
         optimiser.zero_grad(set_to_none=True)
         scheduler.step()
+        step_taken = True
 
-    return loss.item() * gradient_accumulation_steps
+    return loss.item() * gradient_accumulation_steps, step_taken
 
 
 def validate_step(model, val_loader, device, ignore_index=-100):
@@ -154,6 +157,13 @@ def train(config, device=None):
     if config.use_compile:
         model = torch.compile(model, mode="reduce-overhead")
 
+    ema_model = None
+    if config.ema_decay > 0:
+        ema_model = copy.deepcopy(model)
+        ema_model.eval()
+        for p in ema_model.parameters():
+            p.requires_grad = False
+
     optimiser = torch.optim.AdamW(
         model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
     )
@@ -216,7 +226,7 @@ def train(config, device=None):
                 leave=True,
             ) as progress_bar:
                 for batch in batches:
-                    batch_loss = train_step(
+                    batch_loss, step_taken = train_step(
                         model,
                         batch,
                         optimiser,
@@ -232,6 +242,16 @@ def train(config, device=None):
                     batches_trained_this_epoch += 1
                     batches_trained_this_run += 1
                     global_step += 1
+
+                    if step_taken and ema_model is not None:
+                        with torch.no_grad():
+                            for ema_p, p in zip(
+                                ema_model.parameters(), model.parameters()
+                            ):
+                                ema_p.mul_(config.ema_decay).add_(
+                                    p, alpha=1 - config.ema_decay
+                                )
+
                     progress_bar.set_postfix(
                         batch_loss=f"{batch_loss:.4f}",
                         global_step=global_step,
@@ -242,7 +262,7 @@ def train(config, device=None):
             batch_offset = 0
             train_perplexity = math.exp(avg_train_loss)
             avg_val_loss = validate_step(
-                model,
+                ema_model if ema_model is not None else model,
                 val_loader,
                 device,
                 ignore_index=config.ignore_index,
@@ -257,7 +277,7 @@ def train(config, device=None):
 
             checkpoint_path = save_checkpoint(
                 config,
-                model,
+                ema_model if ema_model is not None else model,
                 optimiser,
                 scheduler,
                 completed_epoch=epoch + 1,
@@ -281,7 +301,7 @@ def train(config, device=None):
 
         checkpoint_path = save_checkpoint(
             config,
-            model,
+            ema_model if ema_model is not None else model,
             optimiser,
             scheduler,
             completed_epoch=completed_epoch,

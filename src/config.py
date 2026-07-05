@@ -17,6 +17,7 @@ class Config:
     gradient_accumulation_steps: int = 4
     use_compile: bool = False
     activation_checkpointing: bool = False
+    ema_decay: float = 0.0
     dropout: float = 0.1
     max_grad_norm: float | None = 1.0
     ignore_index: int = -100
