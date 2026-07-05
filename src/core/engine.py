@@ -146,6 +146,7 @@ def save_checkpoint(
 
 def train(config, device=None):
     device = device or get_device()
+    torch.set_float32_matmul_precision("high")
     train_loader, val_loader = get_data_loaders(config=config)
 
     if config.model_type == "roformer":
