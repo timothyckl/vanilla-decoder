@@ -1,3 +1,4 @@
+import math
 import os
 from dataclasses import asdict
 from itertools import islice
@@ -203,10 +204,12 @@ def train(config, device=None):
                 device,
                 ignore_index=config.ignore_index,
             )
+            val_perplexity = math.exp(avg_val_loss)
 
             tqdm.write(
                 f"Epoch {epoch + 1}: "
-                f"train_loss={avg_train_loss:.4f}, val_loss={avg_val_loss:.4f}"
+                f"train_loss={avg_train_loss:.4f}, val_loss={avg_val_loss:.4f}, "
+                f"ppl={val_perplexity:.2f}"
             )
 
             checkpoint_path = save_checkpoint(
