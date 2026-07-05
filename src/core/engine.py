@@ -1,4 +1,3 @@
-import copy
 import math
 import os
 from dataclasses import asdict
@@ -11,7 +10,24 @@ from tqdm import tqdm
 
 from core.model import DecoderTransformer, RoFormer
 from core.utils import get_autocast_context, get_device
-from data.setup_data import get_data_loaders
+from data.setup_data import get_data_loader_kwargs, get_data_loaders
+
+
+def scale_gradients(model, scale):
+    if scale == 1.0:
+        return
+
+    for parameter in model.parameters():
+        if parameter.grad is not None:
+            parameter.grad.mul_(scale)
+
+
+def optimiser_step(model, optimiser, scheduler, max_grad_norm=None):
+    if max_grad_norm is not None:
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+    optimiser.step()
+    optimiser.zero_grad(set_to_none=True)
+    scheduler.step()
 
 
 def train_step(
@@ -23,7 +39,7 @@ def train_step(
     ignore_index=-100,
     max_grad_norm=None,
     gradient_accumulation_steps=1,
-    global_step=0,
+    should_step=True,
     use_checkpoint=False,
 ):
     model.train()
@@ -42,16 +58,10 @@ def train_step(
     loss = loss / gradient_accumulation_steps
     loss.backward()
 
-    step_taken = False
-    if (global_step + 1) % gradient_accumulation_steps == 0:
-        if max_grad_norm is not None:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
-        optimiser.step()
-        optimiser.zero_grad(set_to_none=True)
-        scheduler.step()
-        step_taken = True
+    if should_step:
+        optimiser_step(model, optimiser, scheduler, max_grad_norm=max_grad_norm)
 
-    return loss.item() * gradient_accumulation_steps, step_taken
+    return loss.item() * gradient_accumulation_steps
 
 
 def validate_step(model, val_loader, device, ignore_index=-100):
@@ -155,32 +165,33 @@ def train(config, device=None):
         model = DecoderTransformer(config=config)
     model.to(device)
 
-    if config.use_compile:
-        model = torch.compile(model, mode="reduce-overhead")
-
-    ema_model = None
-    if config.ema_decay > 0:
-        ema_model = copy.deepcopy(model)
-        ema_model.eval()
-        for p in ema_model.parameters():
-            p.requires_grad = False
-
     optimiser = torch.optim.AdamW(
         model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
     )
+    optimiser.zero_grad(set_to_none=True)
 
-    total_steps = config.epochs * len(train_loader)
-    warmup = torch.optim.lr_scheduler.LinearLR(
-        optimiser, start_factor=0.0, end_factor=1.0, total_iters=config.warmup_steps
-    )
+    steps_per_epoch = math.ceil(len(train_loader) / config.gradient_accumulation_steps)
+    total_steps = max(1, config.epochs * steps_per_epoch)
+    warmup_steps = min(config.warmup_steps, max(total_steps - 1, 0))
+    cosine_steps = max(1, total_steps - warmup_steps)
+
     cosine = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimiser,
-        T_max=total_steps - config.warmup_steps,
+        T_max=cosine_steps,
         eta_min=config.min_lr,
     )
-    scheduler = torch.optim.lr_scheduler.SequentialLR(
-        optimiser, schedulers=[warmup, cosine], milestones=[config.warmup_steps]
-    )
+    if warmup_steps > 0:
+        warmup = torch.optim.lr_scheduler.LinearLR(
+            optimiser,
+            start_factor=1e-6,
+            end_factor=1.0,
+            total_iters=warmup_steps,
+        )
+        scheduler = torch.optim.lr_scheduler.SequentialLR(
+            optimiser, schedulers=[warmup, cosine], milestones=[warmup_steps]
+        )
+    else:
+        scheduler = cosine
 
     start_epoch, global_step, batch_offset, scheduler = load_checkpoint(
         config, model, optimiser, scheduler, device
@@ -202,6 +213,7 @@ def train(config, device=None):
     total_loss = 0.0
     batches_trained_this_epoch = 0
     batches_trained_this_run = 0
+    accumulation_step = 0
 
     try:
         for epoch in range(start_epoch, config.epochs):
@@ -209,6 +221,7 @@ def train(config, device=None):
             total_loss = 0.0
             batches_trained_this_epoch = batch_offset if epoch == start_epoch else 0
             batches_trained_this_run = 0
+            accumulation_step = 0
 
             generator = torch.Generator()
             generator.manual_seed(config.seed + epoch)
@@ -217,6 +230,7 @@ def train(config, device=None):
                 batch_size=config.batch_size,
                 shuffle=True,
                 generator=generator,
+                **get_data_loader_kwargs(config),
             )
             batches = islice(epoch_train_loader, batches_trained_this_epoch, None)
 
@@ -227,7 +241,9 @@ def train(config, device=None):
                 leave=True,
             ) as progress_bar:
                 for batch in batches:
-                    batch_loss, step_taken = train_step(
+                    accumulation_step += 1
+                    should_step = accumulation_step == config.gradient_accumulation_steps
+                    batch_loss = train_step(
                         model,
                         batch,
                         optimiser,
@@ -236,7 +252,7 @@ def train(config, device=None):
                         ignore_index=config.ignore_index,
                         max_grad_norm=config.max_grad_norm,
                         gradient_accumulation_steps=config.gradient_accumulation_steps,
-                        global_step=global_step,
+                        should_step=should_step,
                         use_checkpoint=config.activation_checkpointing,
                     )
                     total_loss += batch_loss
@@ -244,14 +260,8 @@ def train(config, device=None):
                     batches_trained_this_run += 1
                     global_step += 1
 
-                    if step_taken and ema_model is not None:
-                        with torch.no_grad():
-                            for ema_p, p in zip(
-                                ema_model.parameters(), model.parameters()
-                            ):
-                                ema_p.mul_(config.ema_decay).add_(
-                                    p, alpha=1 - config.ema_decay
-                                )
+                    if should_step:
+                        accumulation_step = 0
 
                     progress_bar.set_postfix(
                         batch_loss=f"{batch_loss:.4f}",
@@ -259,11 +269,24 @@ def train(config, device=None):
                     )
                     progress_bar.update(1)
 
+            if accumulation_step > 0:
+                scale_gradients(
+                    model,
+                    config.gradient_accumulation_steps / accumulation_step,
+                )
+                optimiser_step(
+                    model,
+                    optimiser,
+                    scheduler,
+                    max_grad_norm=config.max_grad_norm,
+                )
+                accumulation_step = 0
+
             avg_train_loss = total_loss / max(batches_trained_this_run, 1)
             batch_offset = 0
             train_perplexity = math.exp(avg_train_loss)
             avg_val_loss = validate_step(
-                ema_model if ema_model is not None else model,
+                model,
                 val_loader,
                 device,
                 ignore_index=config.ignore_index,
@@ -281,7 +304,7 @@ def train(config, device=None):
 
             checkpoint_path = save_checkpoint(
                 config,
-                ema_model if ema_model is not None else model,
+                model,
                 optimiser,
                 scheduler,
                 completed_epoch=epoch + 1,
@@ -292,6 +315,19 @@ def train(config, device=None):
             )
             tqdm.write(f"Saved checkpoint to {checkpoint_path}")
     except KeyboardInterrupt:
+        if accumulation_step > 0:
+            scale_gradients(
+                model,
+                config.gradient_accumulation_steps / accumulation_step,
+            )
+            optimiser_step(
+                model,
+                optimiser,
+                scheduler,
+                max_grad_norm=config.max_grad_norm,
+            )
+            accumulation_step = 0
+
         avg_train_loss = (
             total_loss / batches_trained_this_run
             if batches_trained_this_run > 0
@@ -305,7 +341,7 @@ def train(config, device=None):
 
         checkpoint_path = save_checkpoint(
             config,
-            ema_model if ema_model is not None else model,
+            model,
             optimiser,
             scheduler,
             completed_epoch=completed_epoch,

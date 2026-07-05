@@ -15,9 +15,7 @@ class Config:
     warmup_steps: int = 500
     min_lr: float = 1e-5
     gradient_accumulation_steps: int = 4
-    use_compile: bool = False
     activation_checkpointing: bool = False
-    ema_decay: float = 0.0
     dropout: float = 0.1
     max_grad_norm: float | None = 1.0
     ignore_index: int = -100
@@ -37,6 +35,16 @@ class Config:
             raise ValueError("num_heads must be at least 1")
         if self.embed_dim % self.num_heads != 0:
             raise ValueError("embed_dim must be divisible by num_heads")
+        if self.warmup_steps < 0:
+            raise ValueError("warmup_steps must be non-negative")
+        if self.min_lr < 0:
+            raise ValueError("min_lr must be non-negative")
+        if self.gradient_accumulation_steps < 1:
+            raise ValueError("gradient_accumulation_steps must be at least 1")
+        if self.num_workers < 0:
+            raise ValueError("num_workers must be non-negative")
+        if self.prefetch_factor < 1:
+            raise ValueError("prefetch_factor must be at least 1")
         if not 0.0 <= self.dropout < 1.0:
             raise ValueError("dropout must be in the range [0.0, 1.0)")
 

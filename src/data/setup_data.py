@@ -28,6 +28,19 @@ def group_texts(examples, block_size):
     return {"input_ids": input_blocks, "labels": label_blocks}
 
 
+def get_data_loader_kwargs(config):
+    kwargs = {
+        "num_workers": config.num_workers,
+        "pin_memory": False,
+    }
+
+    if config.num_workers > 0:
+        kwargs["persistent_workers"] = True
+        kwargs["prefetch_factor"] = config.prefetch_factor
+
+    return kwargs
+
+
 def get_data_loaders(config):
     train_path, val_path = _dataset_paths(config.block_size)
 
@@ -77,19 +90,13 @@ def get_data_loaders(config):
         train_dataset,
         batch_size=config.batch_size,
         shuffle=True,
-        num_workers=config.num_workers,
-        pin_memory=True,
-        persistent_workers=True,
-        prefetch_factor=config.prefetch_factor,
+        **get_data_loader_kwargs(config),
     )
     val_loader = DataLoader(
         val_dataset,
         batch_size=config.batch_size,
         shuffle=False,
-        num_workers=config.num_workers,
-        pin_memory=True,
-        persistent_workers=True,
-        prefetch_factor=config.prefetch_factor,
+        **get_data_loader_kwargs(config),
     )
 
     return train_loader, val_loader
