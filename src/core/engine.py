@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from core.model import DecoderTransformer, RoFormer
-from core.utils import get_device
+from core.utils import get_autocast_context, get_device
 from data.setup_data import get_data_loaders
 
 
@@ -31,7 +31,7 @@ def train_step(
     input_ids = batch["input_ids"].to(device)
     labels = batch["labels"].to(device)
 
-    with torch.autocast(device_type="mps", dtype=torch.bfloat16):
+    with get_autocast_context(device):
         logits = model(input_ids, use_checkpoint=use_checkpoint)
         loss = F.cross_entropy(
             input=logits.view(-1, logits.size(-1)),
