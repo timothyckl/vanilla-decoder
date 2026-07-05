@@ -150,6 +150,9 @@ def train(config, device=None):
         model = DecoderTransformer(config=config)
     model.to(device)
 
+    if config.use_compile:
+        model = torch.compile(model, mode="reduce-overhead")
+
     optimiser = torch.optim.AdamW(
         model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
     )

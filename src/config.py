@@ -15,6 +15,7 @@ class Config:
     warmup_steps: int = 500
     min_lr: float = 1e-5
     gradient_accumulation_steps: int = 4
+    use_compile: bool = False
     dropout: float = 0.1
     max_grad_norm: float | None = 1.0
     ignore_index: int = -100
