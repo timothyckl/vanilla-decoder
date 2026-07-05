@@ -13,7 +13,17 @@ from core.utils import get_device
 from data.setup_data import get_data_loaders
 
 
-def train_step(model, batch, optimiser, scheduler, device, ignore_index=-100, max_grad_norm=None):
+def train_step(
+    model,
+    batch,
+    optimiser,
+    scheduler,
+    device,
+    ignore_index=-100,
+    max_grad_norm=None,
+    gradient_accumulation_steps=1,
+    global_step=0,
+):
     model.train()
 
     input_ids = batch["input_ids"].to(device)
@@ -27,14 +37,17 @@ def train_step(model, batch, optimiser, scheduler, device, ignore_index=-100, ma
             ignore_index=ignore_index,
         )
 
-    optimiser.zero_grad(set_to_none=True)
+    loss = loss / gradient_accumulation_steps
     loss.backward()
-    if max_grad_norm is not None:
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
-    optimiser.step()
-    scheduler.step()
 
-    return loss.item()
+    if (global_step + 1) % gradient_accumulation_steps == 0:
+        if max_grad_norm is not None:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+        optimiser.step()
+        optimiser.zero_grad(set_to_none=True)
+        scheduler.step()
+
+    return loss.item() * gradient_accumulation_steps
 
 
 def validate_step(model, val_loader, device, ignore_index=-100):
@@ -207,6 +220,8 @@ def train(config, device=None):
                         device,
                         ignore_index=config.ignore_index,
                         max_grad_norm=config.max_grad_norm,
+                        gradient_accumulation_steps=config.gradient_accumulation_steps,
+                        global_step=global_step,
                     )
                     total_loss += batch_loss
                     batches_trained_this_epoch += 1
