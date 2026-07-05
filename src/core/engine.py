@@ -269,6 +269,9 @@ def train(config, device=None):
             )
             val_perplexity = math.exp(avg_val_loss)
 
+            if device.type == "mps":
+                torch.mps.empty_cache()
+
             tqdm.write(
                 f"Epoch {epoch + 1}: "
                 f"train_loss={avg_train_loss:.4f}, train_ppl={train_perplexity:.2f}, "
