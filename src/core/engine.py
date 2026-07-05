@@ -132,7 +132,9 @@ def train(config, device=None):
         model = DecoderTransformer(config=config)
     model.to(device)
 
-    optimiser = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
+    optimiser = torch.optim.AdamW(
+        model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
+    )
     start_epoch, global_step, batch_offset = load_checkpoint(
         config, model, optimiser, device
     )

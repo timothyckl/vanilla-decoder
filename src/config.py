@@ -11,6 +11,7 @@ class Config:
     num_layers: int = 6
     epochs: int = 3
     learning_rate: float = 1e-3
+    weight_decay: float = 0.1
     dropout: float = 0.1
     max_grad_norm: float | None = 1.0
     ignore_index: int = -100
