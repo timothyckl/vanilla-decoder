@@ -250,7 +250,7 @@ class DecoderTransformer(nn.Module):
         for layer in self.layers:
             layer.attn_heads.reset_cache()
 
-    def forward(self, input_ids, use_cache=False):
+    def forward(self, input_ids, use_cache=False, use_checkpoint=False):
         cached_seq_len = 0
 
         if use_cache and self.layers[0].attn_heads.cache_k is not None:
@@ -270,7 +270,12 @@ class DecoderTransformer(nn.Module):
 
         x = position_encoding
         for layer in self.layers:
-            x = layer(x, bool_mask, use_cache=use_cache)
+            if use_checkpoint and self.training:
+                x = torch.utils.checkpoint.checkpoint(
+                    layer, x, bool_mask, use_cache, use_reentrant=False
+                )
+            else:
+                x = layer(x, bool_mask, use_cache=use_cache)
 
         logits = self.lm_head(x)
 
@@ -303,7 +308,7 @@ class RoFormer(nn.Module):
         for layer in self.layers:
             layer.attn_heads.reset_cache()
 
-    def forward(self, input_ids, use_cache=False):
+    def forward(self, input_ids, use_cache=False, use_checkpoint=False):
         word_embedding = self.we(input_ids)
 
         seq_len = input_ids.size(1)
@@ -317,7 +322,12 @@ class RoFormer(nn.Module):
 
         x = word_embedding
         for layer in self.layers:
-            x = layer(x, bool_mask, use_cache=use_cache)
+            if use_checkpoint and self.training:
+                x = torch.utils.checkpoint.checkpoint(
+                    layer, x, bool_mask, use_cache, use_reentrant=False
+                )
+            else:
+                x = layer(x, bool_mask, use_cache=use_cache)
 
         logits = self.lm_head(x)
 

@@ -23,6 +23,7 @@ def train_step(
     max_grad_norm=None,
     gradient_accumulation_steps=1,
     global_step=0,
+    use_checkpoint=False,
 ):
     model.train()
 
@@ -30,7 +31,7 @@ def train_step(
     labels = batch["labels"].to(device)
 
     with torch.autocast(device_type="mps", dtype=torch.bfloat16):
-        logits = model(input_ids)
+        logits = model(input_ids, use_checkpoint=use_checkpoint)
         loss = F.cross_entropy(
             input=logits.view(-1, logits.size(-1)),
             target=labels.view(-1),
@@ -225,6 +226,7 @@ def train(config, device=None):
                         max_grad_norm=config.max_grad_norm,
                         gradient_accumulation_steps=config.gradient_accumulation_steps,
                         global_step=global_step,
+                        use_checkpoint=config.activation_checkpointing,
                     )
                     total_loss += batch_loss
                     batches_trained_this_epoch += 1
