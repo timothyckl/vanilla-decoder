@@ -20,6 +20,8 @@ class Config:
     checkpoint_prefix: str = "checkpoint"
     model_type: str = "decoder"
     seed: int = 42
+    num_workers: int = 4
+    prefetch_factor: int = 2
 
     def __post_init__(self):
         if self.block_size < 1:
@@ -38,5 +40,5 @@ class RoFormerConfig(Config):
     block_size: int = 256
     model_type: str = "roformer"
     checkpoint_prefix: str = "roformer_checkpoint"
-    checkpoint_path: str | None = None
+    checkpoint_path: str | None = "roformer_checkpoint_epoch_000_step_008335.pt" 
     resume_training: bool = False

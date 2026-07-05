@@ -73,7 +73,23 @@ def get_data_loaders(config):
     train_dataset = load_from_disk(train_path)
     val_dataset = load_from_disk(val_path)
 
-    train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=config.batch_size,
+        shuffle=True,
+        num_workers=config.num_workers,
+        pin_memory=True,
+        persistent_workers=True,
+        prefetch_factor=config.prefetch_factor,
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=config.batch_size,
+        shuffle=False,
+        num_workers=config.num_workers,
+        pin_memory=True,
+        persistent_workers=True,
+        prefetch_factor=config.prefetch_factor,
+    )
 
     return train_loader, val_loader
