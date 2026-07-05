@@ -175,11 +175,7 @@ class MultiHeadAttention(nn.Module):
             self.cache_k = k
             self.cache_v = v
 
-        q_len = q.size(-2)  
-        k_len = k.size(-2) 
-
-        # mask during training/prefill, not during decode
-        is_causal = mask is not None and (q_len == k_len)
+        is_causal = not use_cache
 
         att_scr = F.scaled_dot_product_attention(
             q,
@@ -259,23 +255,14 @@ class DecoderTransformer(nn.Module):
         word_embedding = self.we(input_ids)
         position_encoding = self.pe(word_embedding, start_pos=cached_seq_len)
 
-        seq_len = input_ids.size(1)
-        bool_mask = torch.triu(
-            torch.ones((seq_len, seq_len), device=input_ids.device, dtype=torch.bool),
-            diagonal=1,
-        )
-        bool_mask = bool_mask.unsqueeze(0).unsqueeze(
-            0
-        )  # [batch_size, num_heads, seq_len, seq_len]
-
         x = position_encoding
         for layer in self.layers:
             if use_checkpoint and self.training:
                 x = torch.utils.checkpoint.checkpoint(
-                    layer, x, bool_mask, use_cache, use_reentrant=False
+                    layer, x, None, use_cache, use_reentrant=False
                 )
             else:
-                x = layer(x, bool_mask, use_cache=use_cache)
+                x = layer(x, None, use_cache=use_cache)
 
         logits = self.lm_head(x)
 
@@ -311,23 +298,14 @@ class RoFormer(nn.Module):
     def forward(self, input_ids, use_cache=False, use_checkpoint=False):
         word_embedding = self.we(input_ids)
 
-        seq_len = input_ids.size(1)
-        bool_mask = torch.triu(
-            torch.ones((seq_len, seq_len), device=input_ids.device, dtype=torch.bool),
-            diagonal=1,
-        )
-        bool_mask = bool_mask.unsqueeze(0).unsqueeze(
-            0
-        )  # [batch_size, num_heads, seq_len, seq_len]
-
         x = word_embedding
         for layer in self.layers:
             if use_checkpoint and self.training:
                 x = torch.utils.checkpoint.checkpoint(
-                    layer, x, bool_mask, use_cache, use_reentrant=False
+                    layer, x, None, use_cache, use_reentrant=False
                 )
             else:
-                x = layer(x, bool_mask, use_cache=use_cache)
+                x = layer(x, None, use_cache=use_cache)
 
         logits = self.lm_head(x)
 
