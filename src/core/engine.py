@@ -13,7 +13,7 @@ from core.utils import get_device
 from data.setup_data import get_data_loaders
 
 
-def train_step(model, batch, optimiser, device, ignore_index=-100, max_grad_norm=None):
+def train_step(model, batch, optimiser, scheduler, device, ignore_index=-100, max_grad_norm=None):
     model.train()
 
     input_ids = batch["input_ids"].to(device)
@@ -32,6 +32,7 @@ def train_step(model, batch, optimiser, device, ignore_index=-100, max_grad_norm
     if max_grad_norm is not None:
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
     optimiser.step()
+    scheduler.step()
 
     return loss.item()
 
@@ -64,9 +65,9 @@ def get_checkpoint_path(config, epoch, global_step):
     return os.path.join(config.checkpoint_dir, filename)
 
 
-def load_checkpoint(config, model, optimiser, device):
+def load_checkpoint(config, model, optimiser, scheduler, device):
     if not config.resume_training:
-        return 0, 0, 0
+        return 0, 0, 0, scheduler
 
     if config.checkpoint_path is None:
         raise ValueError("checkpoint_path must be set when resume_training is True")
@@ -78,6 +79,8 @@ def load_checkpoint(config, model, optimiser, device):
     )
     model.load_state_dict(checkpoint["model_state_dict"])
     optimiser.load_state_dict(checkpoint["optimiser_state_dict"])
+    if "scheduler_state_dict" in checkpoint and scheduler is not None:
+        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
 
     start_epoch = checkpoint["epoch"]
     global_step = checkpoint["global_step"]
@@ -89,13 +92,14 @@ def load_checkpoint(config, model, optimiser, device):
         f"batch_offset={batch_offset}"
     )
 
-    return start_epoch, global_step, batch_offset
+    return start_epoch, global_step, batch_offset, scheduler
 
 
 def save_checkpoint(
     config,
     model,
     optimiser,
+    scheduler,
     completed_epoch,
     global_step,
     avg_train_loss,
@@ -109,6 +113,7 @@ def save_checkpoint(
         {
             "model_state_dict": model.state_dict(),
             "optimiser_state_dict": optimiser.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict() if scheduler is not None else None,
             "epoch": completed_epoch,
             "global_step": global_step,
             "batch_offset": batch_offset,
@@ -135,8 +140,22 @@ def train(config, device=None):
     optimiser = torch.optim.AdamW(
         model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
     )
-    start_epoch, global_step, batch_offset = load_checkpoint(
-        config, model, optimiser, device
+
+    total_steps = config.epochs * len(train_loader)
+    warmup = torch.optim.lr_scheduler.LinearLR(
+        optimiser, start_factor=0.0, end_factor=1.0, total_iters=config.warmup_steps
+    )
+    cosine = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimiser,
+        T_max=total_steps - config.warmup_steps,
+        eta_min=config.min_lr,
+    )
+    scheduler = torch.optim.lr_scheduler.SequentialLR(
+        optimiser, schedulers=[warmup, cosine], milestones=[config.warmup_steps]
+    )
+
+    start_epoch, global_step, batch_offset, scheduler = load_checkpoint(
+        config, model, optimiser, scheduler, device
     )
 
     if config.resume_training and batch_offset == 0 and len(train_loader) > 0:
@@ -184,6 +203,7 @@ def train(config, device=None):
                         model,
                         batch,
                         optimiser,
+                        scheduler,
                         device,
                         ignore_index=config.ignore_index,
                         max_grad_norm=config.max_grad_norm,
@@ -219,6 +239,7 @@ def train(config, device=None):
                 config,
                 model,
                 optimiser,
+                scheduler,
                 completed_epoch=epoch + 1,
                 global_step=global_step,
                 avg_train_loss=avg_train_loss,
@@ -242,6 +263,7 @@ def train(config, device=None):
             config,
             model,
             optimiser,
+            scheduler,
             completed_epoch=completed_epoch,
             global_step=global_step,
             avg_train_loss=avg_train_loss,
